@@ -13,8 +13,8 @@ const filters = { vehicle_id: '', status: '', from: '', to: '', q: '', mine: '',
 export async function render(root) {
   const { vehicles } = await get('/vehicles');
   const actions = [];
-  if (hasRole('manager')) actions.push(h('a', { class: 'btn', href: '#/usage-logs/new' }, icon('plus'), '예약 없이 작성'));
-  root.append(pageHead('운행일지', { desc: '차량사용대장입니다. 예약을 마친 뒤 대시보드나 예약 상세에서 운행일지를 입력하세요.', actions }));
+  actions.push(h('a', { class: 'btn btn-primary', href: '#/usage-logs/new' }, icon('plus'), '예약 없이 운행일지 쓰기'));
+  root.append(pageHead('운행일지', { desc: '차량사용대장입니다. 예약한 운행은 대시보드나 예약 상세에서, 예약 없이 운행했다면 "예약 없이 운행일지 쓰기"로 입력하세요.', actions }));
 
   const form = h('form', { class: 'card', role: 'search', 'aria-label': '운행일지 검색' },
     h('div', { class: 'form-grid cols-2', style: { 'grid-template-columns': 'repeat(auto-fit, minmax(10rem, 1fr))' } },

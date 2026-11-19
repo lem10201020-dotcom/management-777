@@ -241,6 +241,35 @@ describe('차량예약관리대장 API', { skip }, () => {
     assert.equal((await ad.put('/approval-line', body([{ name: '팀장', approver_ids: [ids.apv01] }, { name: '관장', approver_ids: [ids.apv02] }]))).status, 200);
   });
 
+  test('T-04-16~19 예약 없이 운행일지: 모든 직원 작성, 시간 겹침·점검중 차단', async () => {
+    const s2 = client(srv.base); await s2.login('staff02');
+    const m = client(srv.base); await m.login('mgr01');
+    const today = todayYmd();
+    const pre = await s2.get(`/usage-logs/new?vehicle_id=${veh2}`);
+    assert.equal(pre.status, 200);
+    assert.equal(pre.data.expected_odometer_start, 5000);
+    const walk = (extra = {}) => ({
+      vehicle_id: veh2, driver_id: ids.staff02, drive_date: today, depart_time: '00:10', return_time: '00:40',
+      odometer_start: 5000, odometer_end: 5012, destination: '△△동 주민센터', purpose_category: '행정업무', passenger_count: 0, ...extra,
+    });
+    const ok = await s2.post('/usage-logs', { ...walk(), submit: true, signature: typedSig('김가상') });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.data.log.reservation_id, null);
+    assert.equal(ok.data.log.status, 'submitted');
+    // 같은 차량 같은 시간 → 거부
+    const clash = await s2.post('/usage-logs', walk({ depart_time: '00:20', return_time: '00:50', odometer_start: 5012, odometer_end: 5020 }));
+    assert.equal(clash.status, 409);
+    assert.equal(clash.data.error.code, 'LOG_OVERLAP');
+    assert.match(clash.data.error.fields.depart_time, /김가상님 운행 기록/);
+    // 점검중 차량: 직원 불가, 차량담당자 가능
+    const mv = await m.post('/vehicles', { plate_no: '90마1234', model: '점검차', seats: 5, fuel_type: '경유', initial_odometer: 100, status: 'maintenance' });
+    const body = { ...walk(), vehicle_id: mv.data.vehicle.id, odometer_start: 100, odometer_end: 110 };
+    const blocked = await s2.post('/usage-logs', body);
+    assert.equal(blocked.status, 400);
+    assert.match(blocked.data.error.fields.vehicle_id, /점검중/);
+    assert.equal((await m.post('/usage-logs', body)).status, 200);
+  });
+
   test('T-09 사용자 관리·마지막 관리자 보호', async () => {
     const ad = client(srv.base); await ad.login('admin01');
     const created = await ad.post('/users', { login_id: 'staff03', name: '오가상', roles: ['staff'] });

@@ -395,7 +395,7 @@ function logPrefill({ user, query }) {
       expected_odometer_start: expectedOdometer(r.vehicle_id, r.start_at),
     };
   }
-  if (!hasRole(user, 'manager')) throw forbidden('예약 없이 운행일지를 만들 권한은 차량담당자에게만 있습니다.');
+  // 예약 없이 운행한 경우: 모든 직원이 작성 가능 (F-04)
   const vid = num(query.get('vehicle_id') || 0);
   if (!vid) return { reservation: null, vehicle: null, draft: null, expected_odometer_start: null };
   const v = vehById(vid);
@@ -415,15 +415,25 @@ function logPrepare(user, input, existing) {
       if (logForRes(r.id)) throw conflict('이미 운행일지가 작성된 예약입니다.');
       if (r.status !== 'confirmed') throw conflict('확정된 예약만 운행일지를 작성할 수 있습니다.');
       value.vehicle_id = r.vehicle_id;
-    } else if (!isManager) throw forbidden('예약 없이 운행일지를 만들 권한은 차량담당자에게만 있습니다.');
+    }
   }
   const v = vehById(value.vehicle_id);
   if (!v) throw bad('입력값을 확인해 주세요.', { vehicle_id: '차량을 다시 선택해 주세요.' });
+  if (!existing && !value.reservation_id) {
+    if (v.status === 'retired') throw bad('입력값을 확인해 주세요.', { vehicle_id: '운행이 종료된 차량입니다. 다른 차량을 선택해 주세요.' });
+    if (v.status === 'maintenance' && !isManager) throw bad('입력값을 확인해 주세요.', { vehicle_id: '점검중인 차량입니다. 차량담당자에게 확인해 주세요.' });
+  }
   if (value.passenger_count > v.seats - 1) throw bad('입력값을 확인해 주세요.', { passenger_count: `이 차량의 동승 가능 인원은 최대 ${v.seats - 1}명입니다.` });
   const d = userById(value.driver_id);
   if (!(d && d.is_active && d.can_drive) && !(existing && existing.driver_id === value.driver_id)) throw bad('입력값을 확인해 주세요.', { driver_id: '운전 가능한 직원을 선택해 주세요.' });
   if (value.drive_date > todayYmd()) throw bad('입력값을 확인해 주세요.', { drive_date: '운행일은 오늘 이후로 입력할 수 없습니다.' });
   const trip = computeTrip(value.drive_date, value.depart_time, value.return_time);
+  const clash = db.logs.filter((l) => l.vehicle_id === value.vehicle_id && l.id !== (existing?.id ?? 0)
+    && ms(l.depart_at) < trip.return_at.getTime() && ms(l.return_at) > trip.depart_at.getTime()).sort((a, b) => ms(a.depart_at) - ms(b.depart_at))[0];
+  if (clash) {
+    const msg = `같은 차량의 ${userById(clash.driver_id).name}님 운행 기록(${rangeLabel(clash.depart_at, clash.return_at)})과 시간이 겹칩니다. 출발·도착 시각을 확인해 주세요.`;
+    throw conflict(msg, { code: 'LOG_OVERLAP', fields: { depart_time: msg } });
+  }
   assertLedgerEditable(value.vehicle_id, value.drive_date.slice(0, 7));
   if (existing) assertLedgerEditable(existing.vehicle_id, existing.drive_date.slice(0, 7));
   const expected = expectedOdometer(value.vehicle_id, trip.depart_at.toISOString(), existing?.id ?? 0);

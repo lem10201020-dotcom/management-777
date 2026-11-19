@@ -1,6 +1,6 @@
 // F-04 운행일지(차량사용대장)
 import { validateUsageLog, hasErrors, computeTrip, isValidYmd } from '../../../js/utils/validate.js';
-import { todayYmd } from '../../../js/utils/format.js';
+import { todayYmd, rangeLabel } from '../../../js/utils/format.js';
 import { badRequest, conflict, forbidden, notFound } from '../http.js';
 import { requireUser, hasRole } from '../session.js';
 import { audit } from '../audit.js';
@@ -110,10 +110,10 @@ async function prefill({ sql, user, query }) {
       expected_odometer_start: await expectedOdometer(sql, r.vehicle_id, r.start_at),
     };
   }
-  if (!hasRole(user, 'manager')) throw forbidden('예약 없이 운행일지를 만들 권한은 차량담당자에게만 있습니다.');
+  // 예약 없이 운행한 경우: 모든 직원이 작성 가능 (FEATURES.md F-04, 2026-11-19 결정)
   const vehicleId = Number(query.get('vehicle_id') || 0);
   if (!vehicleId) return { reservation: null, vehicle: null, draft: null, expected_odometer_start: null };
-  const [v] = await sql`select id, plate_no, model, seats from vehicles where id = ${vehicleId}`;
+  const [v] = await sql`select id, plate_no, model, seats, status from vehicles where id = ${vehicleId}`;
   if (!v) throw notFound('차량을 찾을 수 없습니다.');
   return { reservation: null, vehicle: v, draft: { vehicle_id: v.id }, expected_odometer_start: await expectedOdometer(sql, v.id, new Date()) };
 }
@@ -138,13 +138,16 @@ async function prepare(sql, user, input, existing) {
       if (r.log_id) throw conflict('이미 운행일지가 작성된 예약입니다.', { usage_log_id: r.log_id });
       if (r.status !== 'confirmed') throw conflict('확정된 예약만 운행일지를 작성할 수 있습니다.');
       value.vehicle_id = r.vehicle_id;
-    } else if (!isManager) {
-      throw forbidden('예약 없이 운행일지를 만들 권한은 차량담당자에게만 있습니다.');
     }
   }
 
   const [v] = await sql`select * from vehicles where id = ${value.vehicle_id}`;
   if (!v) throw badRequest('입력값을 확인해 주세요.', { vehicle_id: '차량을 다시 선택해 주세요.' });
+  // 예약 없이 새로 쓰는 운행일지: 운행종료 차량 불가, 점검중 차량은 차량담당자만 (F-04 규칙 7)
+  if (!existing && !value.reservation_id) {
+    if (v.status === 'retired') throw badRequest('입력값을 확인해 주세요.', { vehicle_id: '운행이 종료된 차량입니다. 다른 차량을 선택해 주세요.' });
+    if (v.status === 'maintenance' && !isManager) throw badRequest('입력값을 확인해 주세요.', { vehicle_id: '점검중인 차량입니다. 차량담당자에게 확인해 주세요.' });
+  }
   if (value.passenger_count > v.seats - 1) {
     throw badRequest('입력값을 확인해 주세요.', { passenger_count: `이 차량의 동승 가능 인원은 최대 ${v.seats - 1}명입니다.` });
   }
@@ -155,6 +158,16 @@ async function prepare(sql, user, input, existing) {
   if (value.drive_date > todayYmd()) throw badRequest('입력값을 확인해 주세요.', { drive_date: '운행일은 오늘 이후로 입력할 수 없습니다.' });
 
   const trip = computeTrip(value.drive_date, value.depart_time, value.return_time);
+  // 같은 차량이 같은 시간에 두 번 운행할 수 없다 (F-04 규칙 8)
+  const [clash] = await sql`
+    select l.depart_at, l.return_at, u.name from usage_logs l join users u on u.id = l.driver_id
+    where l.vehicle_id = ${value.vehicle_id} and l.id <> ${existing?.id ?? 0}
+      and l.depart_at < ${trip.return_at} and l.return_at > ${trip.depart_at}
+    order by l.depart_at limit 1`;
+  if (clash) {
+    const msg = `같은 차량의 ${clash.name}님 운행 기록(${rangeLabel(clash.depart_at, clash.return_at)})과 시간이 겹칩니다. 출발·도착 시각을 확인해 주세요.`;
+    throw conflict(msg, { code: 'LOG_OVERLAP', fields: { depart_time: msg } });
+  }
   await assertLedgerEditable(sql, value.vehicle_id, value.drive_date.slice(0, 7));
   if (existing) await assertLedgerEditable(sql, existing.vehicle_id, existing.drive_date.slice(0, 7));
 

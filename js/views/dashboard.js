@@ -18,7 +18,8 @@ export async function render(root) {
   }
   const newBtn = h('button', { type: 'button', class: 'btn btn-primary' }, icon('plus'), '차량예약');
   newBtn.addEventListener('click', () => openReservationForm({ onSaved: rerender }));
-  root.append(pageHead('대시보드', { desc: `${state.user.name}님, ${dateLabel(d.today, true)} 차량 현황입니다.`, actions: [newBtn] }));
+  const walkIn = h('a', { class: 'btn', href: '#/usage-logs/new' }, '예약 없이 운행일지 쓰기');
+  root.append(pageHead('대시보드', { desc: `${state.user.name}님, ${dateLabel(d.today, true)} 차량 현황입니다.`, actions: [walkIn, newBtn] }));
 
   const grid = h('div', { class: 'grid grid-12' });
   root.append(grid);

@@ -47,7 +47,7 @@ export async function render(root, { params, query }) {
   const vehicle = vehicles.find((x) => x.id === Number(v.vehicle_id));
 
   root.append(pageHead(isNew ? '운행일지 입력' : '운행일지 수정', {
-    desc: reservationId ? '예약 내용이 미리 채워져 있습니다. 실제 운행 시각과 계기판 값을 입력하세요.' : '예약 없이 운행한 기록을 차량담당자가 직접 입력합니다.',
+    desc: reservationId ? '예약 내용이 미리 채워져 있습니다. 실제 운행 시각과 계기판 값을 입력하세요.' : '예약 없이 운행한 기록을 입력합니다. 차량을 고르면 직전 운행의 도착 계기판 값이 자동으로 채워집니다.',
     actions: log ? [badge('log', log.status)] : [],
   }));
 
@@ -63,7 +63,7 @@ export async function render(root, { params, query }) {
 
   const vehicleField = reservationId || log
     ? h('div', { class: 'field' }, h('span', { class: 'label' }, '차량'), h('p', {}, vehicle ? `${vehicle.model} ${vehicle.plate_no}` : '-'), h('input', { type: 'hidden', name: 'vehicle_id', value: v.vehicle_id }))
-    : field({ name: 'vehicle_id', label: '차량', type: 'select', required: true, value: String(v.vehicle_id), options: vehicles.filter((x) => x.status !== 'retired').map((x) => ({ value: String(x.id), label: `${x.model} (${x.plate_no})` })) });
+    : field({ name: 'vehicle_id', label: '차량', type: 'select', required: true, value: String(v.vehicle_id), options: vehicles.filter((x) => (hasRole('manager') ? x.status !== 'retired' : x.status === 'available')).map((x) => ({ value: String(x.id), label: `${x.model} (${x.plate_no})` })) });
 
   const distanceOut = h('output', { class: 'stat-value num', 'aria-live': 'polite' }, '-');
   const mismatchBox = h('div', { class: 'full', hidden: true });
