@@ -29,7 +29,16 @@ const app = document.getElementById('app');
 const NOT_CONFIGURED = ['DB_NOT_CONFIGURED', 'SERVER_NOT_CONFIGURED'];
 
 async function boot() {
-  if (new URLSearchParams(location.search).has('demo')) setDemo(true);
+  const params = new URLSearchParams(location.search);
+  if (params.has('demo')) {
+    setDemo(params.get('demo') !== '0'); // ?demo=1 체험 시작, ?demo=0 체험 끝내기
+  } else if (isDemo()) {
+    // 예전에 DB가 없어 자동으로 체험 모드가 켜졌더라도, 지금 서버 DB가 연결되어 있으면 실제 모드로 돌아간다
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store' });
+      if (res.ok && (await res.json()).ok) setDemo(false);
+    } catch { /* 서버 없음: 체험 모드 유지 */ }
+  }
   try {
     const me = await get('/auth/me');
     if (!me.user) return showLogin();
@@ -78,7 +87,8 @@ function demoQuickLogin() {
       }));
       return b;
     })),
-    h('p', { class: 'help' }, '직접 로그인할 때 비밀번호는 모두 Sample1234 입니다.'));
+    h('p', { class: 'help' }, '직접 로그인할 때 비밀번호는 모두 Sample1234 입니다.'),
+    h('p', { class: 'help' }, '실제 계정으로 로그인하려면 서버 DB 연결(환경변수 등록 후 다시 배포)이 필요합니다. 연결되면 이 화면은 자동으로 실제 로그인 화면으로 바뀝니다.'));
 }
 
 function loginForm(onSuccess, { compact = false } = {}) {
