@@ -130,6 +130,9 @@ create table if not exists monthly_ledgers (
   unique (vehicle_id, year_month)
 );
 
+-- 결재요청 시점의 결재라인 스냅숏 — 이후 결재라인을 편집해도 진행·완료된 대장의 결재란은 그대로 (migrations/001)
+alter table monthly_ledgers add column if not exists approval_steps jsonb;
+
 -- 결재 서명 (회차 round별 이력 보존)
 create table if not exists approvals (
   id              integer generated always as identity primary key,

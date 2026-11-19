@@ -22,7 +22,10 @@ export async function render(root, { query }) {
   const next = h('button', { type: 'button', class: 'icon-btn', 'aria-label': '다음 달', disabled: ym >= currentYm() }, icon('right'));
   prev.addEventListener('click', () => go({ ym: addMonths(ym, -1) }));
   next.addEventListener('click', () => go({ ym: addMonths(ym, 1) }));
-  root.append(h('div', { class: 'toolbar' }, h('div', { class: 'cal-nav' }, prev, h('h2', { class: 'cal-title' }, monthLabel(ym)), next)));
+  const printAll = h('a', { class: 'btn', href: `#/print/ledger${qs({ ym, vehicle_id: 'all' })}` }, icon('print'), '이 달 전체 차량 인쇄');
+  const lineLink = h('a', { class: 'btn btn-text', href: '#/approval-line' }, `결재라인: ${state.settings.approval_steps.map((s) => s.name).join(' → ')}${hasRole('admin') ? ' (편집)' : ''}`);
+  root.append(h('div', { class: 'toolbar' }, h('div', { class: 'cal-nav' }, prev, h('h2', { class: 'cal-title' }, monthLabel(ym)), next),
+    h('div', { class: 'row', style: { 'margin-left': 'auto' } }, lineLink, printAll)));
 
   const { vehicles } = await get(`/ledgers/overview${qs({ ym })}`);
   root.append(h('ul', { class: 'list grid grid-3', style: { 'margin-bottom': '1.5rem' }, 'aria-label': '차량 선택' }, vehicles.map((v) => h('li', {},

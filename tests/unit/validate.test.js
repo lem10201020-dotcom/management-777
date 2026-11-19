@@ -74,3 +74,20 @@ test('날짜 도우미', () => {
   assert.equal(fmtKm(12340), '12,340km');
   assert.ok(DEFAULT_SETTINGS.purpose_categories.length > 0);
 });
+
+test('결재라인 검증 (F-14)', async () => {
+  const { validateApprovalLine } = await import('../../js/utils/validate.js');
+  const ok = { steps: [{ name: '팀장', approver_ids: [1] }, { name: '관장', approver_ids: ['2', 3] }] };
+  const r = validateApprovalLine(ok);
+  assert.deepEqual(r.errors, {});
+  assert.deepEqual(r.value.steps.map((s) => s.order), [1, 2]);
+  assert.deepEqual(r.value.steps[1].approver_ids, [2, 3]);
+  assert.equal(r.value.show_drafter, true);
+  assert.ok(validateApprovalLine({ steps: [] }).errors.steps);
+  assert.ok(validateApprovalLine({ steps: Array.from({ length: 6 }, (_, i) => ({ name: `단계${i}`, approver_ids: [i + 1] })) }).errors.steps);
+  assert.ok(validateApprovalLine({ steps: [{ name: '', approver_ids: [1] }] }).errors.step_0_name);
+  assert.ok(validateApprovalLine({ steps: [{ name: '열한글자이름입니다요오', approver_ids: [1] }] }).errors.step_0_name);
+  assert.ok(validateApprovalLine({ steps: [{ name: '팀장', approver_ids: [] }] }).errors.step_0_approvers);
+  assert.match(validateApprovalLine({ steps: [{ name: '팀장', approver_ids: [1] }, { name: '팀장', approver_ids: [2] }] }).errors.step_1_name, /이미 있습니다/);
+  assert.match(validateApprovalLine({ steps: [{ name: '팀장', approver_ids: [1] }, { name: '관장', approver_ids: [1] }] }).errors.step_1_approvers, /한 단계에만/);
+});

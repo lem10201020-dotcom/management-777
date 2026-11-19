@@ -25,9 +25,44 @@ export const DEFAULT_SETTINGS = {
   missing_alert_hours: 24,
   distance_warn_km: 500,
   purpose_categories: ['사례관리 방문', '프로그램 운영', '행정업무', '물품 운반', '회의·교육', '기타'], // TODO-04
-  approval_steps: [{ order: 1, name: '팀장' }, { order: 2, name: '관장' }], // TODO-03 (예시)
+  approval_steps: [{ order: 1, name: '팀장' }, { order: 2, name: '관장' }], // TODO-03 (예시) — 결재라인 설정 화면에서 편집
+  approval_show_drafter: true, // 결재란 맨 앞에 '담당'(결재요청자) 칸 표시
   teams: [],
 };
+
+export const APPROVAL_MAX_STEPS = 5;
+
+/**
+ * 결재라인 검증 (FEATURES.md F-14)
+ * 입력: { steps: [{ name, approver_ids: [] }], show_drafter }
+ * 한 사람은 한 단계에만 지정할 수 있다 (users.approver_step 이 하나이므로).
+ */
+export function validateApprovalLine(input = {}) {
+  const rawSteps = Array.isArray(input.steps) ? input.steps : [];
+  const steps = rawSteps.map((st, i) => ({
+    order: i + 1,
+    name: s(st?.name),
+    approver_ids: [...new Set((Array.isArray(st?.approver_ids) ? st.approver_ids : []).map(toInt))],
+  }));
+  const value = { steps, show_drafter: input.show_drafter !== false };
+  const errors = {};
+  if (!steps.length) errors.steps = '결재 단계를 하나 이상 만들어 주세요.';
+  if (steps.length > APPROVAL_MAX_STEPS) errors.steps = `결재 단계는 최대 ${APPROVAL_MAX_STEPS}단계까지 만들 수 있습니다.`;
+  const seenNames = new Set();
+  const seenUsers = new Map();
+  steps.forEach((st, i) => {
+    if (!lenBetween(st.name, 1, 10)) errors[`step_${i}_name`] = `${i + 1}단계 이름을 1~10자로 입력해 주세요.`;
+    else if (seenNames.has(st.name)) errors[`step_${i}_name`] = `"${st.name}" 단계가 이미 있습니다. 다른 이름을 입력해 주세요.`;
+    seenNames.add(st.name);
+    if (st.approver_ids.some((id) => !(id > 0))) errors[`step_${i}_approvers`] = `${i + 1}단계 결재자를 다시 선택해 주세요.`;
+    else if (!st.approver_ids.length) errors[`step_${i}_approvers`] = `${i + 1}단계(${st.name || '이름 없음'}) 결재자를 한 명 이상 지정해 주세요.`;
+    for (const id of st.approver_ids) {
+      if (seenUsers.has(id)) errors[`step_${i}_approvers`] = `한 사람은 한 단계에만 지정할 수 있습니다. (${seenUsers.get(id) + 1}단계와 중복)`;
+      else seenUsers.set(id, i);
+    }
+  });
+  return { value, errors };
+}
 
 const s = (v) => (typeof v === 'string' ? v.trim() : '');
 const toInt = (v) => {

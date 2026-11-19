@@ -3,7 +3,7 @@
 //   운영에서는 서버 API(api/)가 기준이며, 업무 규칙이 바뀌면 이 파일도 함께 맞춘다. (CLAUDE.md 7장 예외)
 import {
   validateLogin, validateVehicle, validateUser, validateReservation, validateUsageLog, passwordError,
-  hasErrors, computeTrip, isValidYmd, YM_RE, DEFAULT_SETTINGS,
+  hasErrors, computeTrip, isValidYmd, YM_RE, DEFAULT_SETTINGS, validateApprovalLine,
 } from '../utils/validate.js';
 import { todayYmd, addDays, addMonths, currentYm, rangeLabel } from '../utils/format.js';
 
@@ -493,12 +493,12 @@ function computeLedger(user, vid, ym, withSig = false) {
   if (missing.length) blockers.push({ code: 'MISSING', message: `운행일지가 입력되지 않은 예약 ${missing.length}건이 있습니다.`, ids: missing.map((r) => r.id) });
   if (ym > currentYm()) blockers.push({ code: 'FUTURE', message: '아직 오지 않은 달은 결재를 요청할 수 없습니다.' });
   const step = curStep(ledger);
-  const steps = settings().approval_steps;
+  const steps = (['submitted', 'approved'].includes(status) && ledger.approval_steps) || settings().approval_steps; // F-14 스냅숏
   return {
     vehicle, year_month: ym, status, round,
-    ledger: ledger ? { id: ledger.id, manager_comment: ledger.manager_comment, recall_reason: ledger.recall_reason, submitted_at: ledger.submitted_at, submitted_by: ledger.submitted_by } : null,
+    ledger: ledger ? { id: ledger.id, manager_comment: ledger.manager_comment, recall_reason: ledger.recall_reason, submitted_at: ledger.submitted_at, submitted_by: ledger.submitted_by, submitted_by_name: userById(ledger.submitted_by)?.name ?? null } : null,
     summary, live_summary: live, by_purpose: byPurpose, logs, missing_reservations: missing, mismatch_count: logs.filter((l) => l.mismatch).length, blockers,
-    approval_steps: steps, approvals,
+    approval_steps: steps, show_drafter: settings().approval_show_drafter, approvals,
     current_step: status === 'submitted' ? step : null,
     current_step_name: status === 'submitted' ? steps.find((s) => s.order === step)?.name ?? null : null,
     last_rejection: approvals.filter((a) => a.decision === 'rejected').at(-1) ?? null,
@@ -536,7 +536,7 @@ function ledgerSubmit({ user, body }) {
   if (data.blockers.length) throw conflict(data.blockers.map((b) => b.message).join(' '), { code: 'LEDGER_BLOCKED', blockers: data.blockers });
   let l = ledgerOf(vid, ym);
   if (!l) { l = { id: nextId('ledgers'), vehicle_id: vid, year_month: ym, round: 0, recall_reason: '' }; db.ledgers.push(l); }
-  Object.assign(l, { status: 'submitted', round: l.round + 1, snapshot: data.live_summary, manager_comment: comment, recall_reason: '', submitted_by: user.id, submitted_at: nowIso() });
+  Object.assign(l, { status: 'submitted', round: l.round + 1, snapshot: data.live_summary, approval_steps: structuredClone(settings().approval_steps), manager_comment: comment, recall_reason: '', submitted_by: user.id, submitted_at: nowIso() });
   return computeLedger(user, vid, ym);
 }
 function ledgerRecall({ user, params, body }) {
@@ -557,7 +557,7 @@ async function ledgerDecide({ user, params, body }) {
   const l = db.ledgers.find((x) => x.id === params.id);
   if (!l) throw notFound('대장을 찾을 수 없습니다.');
   if (l.status !== 'submitted') throw conflict('결재 진행 중인 대장이 아닙니다.');
-  const steps = settings().approval_steps;
+  const steps = l.approval_steps || settings().approval_steps;
   const step = curStep(l);
   const info = steps.find((s) => s.order === step);
   if (!info) throw conflict('결재 단계 설정을 확인해 주세요.');
@@ -577,6 +577,40 @@ function pendingFor(user) {
     const v = vehById(l.vehicle_id);
     return { id: l.id, vehicle_id: l.vehicle_id, year_month: l.year_month, round: l.round, total_distance: l.snapshot.total_distance, log_count: l.snapshot.log_count, submitted_at: l.submitted_at, plate_no: v.plate_no, model: v.model, step: curStep(l) };
   });
+}
+
+// ───────── 결재라인 (F-14) ─────────
+function approvalLineData() {
+  const s = settings();
+  return {
+    steps: s.approval_steps.map((st) => ({ order: st.order, name: st.name,
+      approvers: db.users.filter((u) => u.is_active && u.roles.includes('approver') && u.approver_step === st.order).map((u) => ({ id: u.id, name: u.name, team: u.team })) })),
+    show_drafter: s.approval_show_drafter ?? true,
+    candidates: db.users.filter((u) => u.is_active).map((u) => ({ id: u.id, name: u.name, team: u.team })).sort((a, b) => a.name.localeCompare(b.name)),
+    in_progress: db.ledgers.filter((l) => l.status === 'submitted').length,
+  };
+}
+function approvalLineSave({ user, body }) {
+  requireRole(user, 'admin');
+  const { value, errors } = validateApprovalLine(body);
+  if (hasErrors(errors)) throw bad(errors.steps || '입력값을 확인해 주세요.', errors);
+  const ids = value.steps.flatMap((st) => st.approver_ids);
+  if (ids.some((id) => !userById(id)?.is_active)) throw bad('사용 중지되었거나 없는 직원이 결재자로 지정되어 있습니다. 다시 선택해 주세요.');
+  const n = db.ledgers.filter((l) => l.status === 'submitted').length;
+  if (n) throw conflict(`결재 진행 중인 대장이 ${n}건 있어 결재라인을 바꿀 수 없습니다. 결재를 마치거나 회수한 뒤 다시 시도하세요.`, { code: 'APPROVAL_IN_PROGRESS' });
+  db.settings.approval_steps = value.steps.map(({ order, name }) => ({ order, name }));
+  db.settings.approval_show_drafter = value.show_drafter;
+  for (const u of db.users) {
+    if (ids.includes(u.id) || !(u.approver_step || u.roles.includes('approver'))) continue;
+    u.approver_step = null;
+    u.roles = u.roles.filter((r) => r !== 'approver');
+    if (!u.roles.length) u.roles = ['staff']; // 역할이 비지 않게
+  }
+  for (const st of value.steps) for (const id of st.approver_ids) {
+    const u = userById(id); u.approver_step = st.order;
+    if (!u.roles.includes('approver')) u.roles = [...u.roles, 'approver'];
+  }
+  return approvalLineData();
 }
 
 // ───────── 대시보드 ─────────
@@ -625,6 +659,7 @@ const table = [
   ['GET', '/usage-logs', logList], ['GET', '/usage-logs/new', logPrefill], ['GET', '/usage-logs/:id', logGet], ['POST', '/usage-logs', logCreate], ['PATCH', '/usage-logs/:id', logUpdate],
   ['GET', '/ledgers', ledgerGet], ['GET', '/ledgers/overview', ledgerOverview], ['POST', '/ledgers/submit', ledgerSubmit],
   ['POST', '/ledgers/:id/recall', ledgerRecall], ['POST', '/ledgers/:id/decide', ledgerDecide], ['GET', '/approvals/pending', ({ user }) => { requireRole(user, 'approver'); return { ledgers: pendingFor(user) }; }],
+  ['GET', '/approval-line', () => approvalLineData()], ['PUT', '/approval-line', approvalLineSave],
   ['GET', '/dashboard', dashboard], ['GET', '/settings', () => ({ settings: settings() })],
 ].map(([method, pattern, fn, opts = {}]) => ({ method, re: new RegExp(`^${pattern.replace(':id', '(\\d+)')}$`), fn, opts }));
 

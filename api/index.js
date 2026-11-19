@@ -10,8 +10,9 @@ import { routes as reservations } from './_lib/routes/reservations.js';
 import { routes as usageLogs } from './_lib/routes/usage-logs.js';
 import { routes as ledgers } from './_lib/routes/ledgers.js';
 import { routes as dashboard } from './_lib/routes/dashboard.js';
+import { routes as approvalLine } from './_lib/routes/approval-line.js';
 
-const table = [...auth, ...vehicles, ...users, ...reservations, ...usageLogs, ...ledgers, ...dashboard].map(
+const table = [...auth, ...vehicles, ...users, ...reservations, ...usageLogs, ...ledgers, ...dashboard, ...approvalLine].map(
   ([method, pattern, handler, opts = {}]) => {
     const keys = [];
     const re = new RegExp(`^${pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '(\\d+)'; })}$`);
@@ -109,6 +110,9 @@ function classifySetupError(err) {
   }
   if (err?.code === '42P01') {
     return { code: 'DB_NOT_INITIALIZED', message: 'DB에 테이블이 아직 없습니다. Supabase SQL Editor에서 db/schema.sql 을 실행하거나 npm run db:setup 을 실행하세요.' };
+  }
+  if (err?.code === '42703') {
+    return { code: 'DB_NEEDS_MIGRATION', message: 'DB 구조가 최신이 아닙니다. Supabase SQL Editor에서 db/migrations 의 새 파일(또는 db/schema.sql 전체)을 실행하거나 npm run db:setup 을 실행하세요.' };
   }
   if (['28P01', '28000'].includes(err?.code)) {
     return { code: 'DB_AUTH_FAILED', message: 'DB 비밀번호 또는 사용자 이름이 맞지 않습니다. DATABASE_URL 을 다시 확인하세요.' };

@@ -10,6 +10,7 @@ export const NAV = [
   { path: '/ledgers', label: '월별 차량대장', icon: 'ledger', roles: ['manager', 'approver', 'admin'], tab: true },
   { path: '/approvals', label: '결재함', icon: 'approve', roles: ['approver'] },
   { path: '/vehicles', label: '차량 관리', icon: 'car', roles: ['manager', 'admin'], group: '관리' },
+  { path: '/approval-line', label: '결재라인 설정', icon: 'approve', roles: ['admin', 'manager', 'approver'], group: '관리' },
   { path: '/users', label: '사용자 관리', icon: 'users', roles: ['admin'], group: '관리' },
   { path: '/settings', label: '설정', icon: 'settings' },
 ];

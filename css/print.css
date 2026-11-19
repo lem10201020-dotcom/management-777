@@ -9,6 +9,7 @@
   .main { padding: 0 !important; max-width: none !important; }
   .paper { margin: 0; padding: 0; box-shadow: none; width: auto; overflow: visible; }
   .paper.portrait { page: portrait; }
+  .paper + .paper { break-before: page; page-break-before: always; }
   .doc-table thead { display: table-header-group; }
   .doc-table tfoot { display: table-row-group; }
   .doc-table tr, .approval-box { break-inside: avoid; page-break-inside: avoid; }

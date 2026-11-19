@@ -135,6 +135,10 @@ DATABASE_URL="복사한 주소" node scripts/create-admin.js admin 관리자이�
 5. Database → Backups에서 자동 백업 상태를 확인합니다(요금제별 차이 — 확인 필요).
 6. 이 앱은 Supabase의 API 키(anon/service_role)를 쓰지 않습니다. 모든 테이블은 RLS가 켜져 있어 REST API로 접근할 수 없습니다.
 
+### 5-1-1. 이미 배포한 DB 갱신 (업데이트 시)
+새 버전에 DB 변경이 있으면 `db/migrations/`의 새 파일을 Supabase SQL Editor에서 실행하세요(또는 `npm run db:setup` — 여러 번 실행해도 안전). 갱신하지 않으면 화면에 "DB 구조가 최신이 아닙니다"(DB_NEEDS_MIGRATION)가 표시됩니다.
+- `001_ledger_approval_steps.sql` — 결재라인 편집 기능 (2026-11-19)
+
 ### 5-2. Vercel
 1. GitHub 저장소를 Vercel 프로젝트에 연결합니다. (Framework Preset: Other, 빌드 명령 없음)
 2. Settings → Environment Variables에 `DATABASE_URL`, `SESSION_SECRET`, `APP_TIMEZONE`을 등록합니다. **Preview에는 운영 DB가 아닌 별도 Supabase 프로젝트**를 연결합니다.
@@ -155,7 +159,12 @@ DATABASE_URL="복사한 주소" node scripts/create-admin.js admin 관리자이�
 ### 차량담당자
 1. **월별 차량대장**에서 연·월과 차량을 고릅니다.
 2. 미제출 운행일지, km 불일치 경고를 확인·정리합니다.
-3. **결재요청** 후, 결재가 끝나면 **인쇄/PDF 저장**을 눌러 보관합니다.
+3. **결재요청** 후, 결재가 끝나면 **인쇄/PDF**를 눌러 보관합니다. 그달 모든 차량을 한 번에 출력하려면 상단의 **이 달 전체 차량 인쇄**를 누릅니다.
+
+### 관리자 — 결재라인 바꾸기
+1. [관리 → 결재라인 설정]에서 단계를 추가·삭제하거나 ▲▼로 순서를 바꾸고, 단계마다 결재자를 지정합니다.
+2. 오른쪽 미리보기에서 출력 결재란 모양을 확인하고 저장합니다. 새로 결재요청하는 대장부터 적용됩니다.
+3. 결재 진행 중인 대장이 있으면 저장할 수 없습니다(결재를 마치거나 회수 후 변경).
 
 ### 결재자
 1. 대시보드의 **결재 대기** 목록에서 대장을 열어 내용을 확인합니다.

@@ -63,6 +63,7 @@ export function client(base) {
     get: (p) => call('GET', p),
     post: (p, b = {}, h) => call('POST', p, b, h),
     patch: (p, b = {}) => call('PATCH', p, b),
+    put: (p, b = {}) => call('PUT', p, b),
     async login(id, pw = 'Sample1234') { const r = await call('POST', '/auth/login', { login_id: id, password: pw }); return r; },
   };
 }

@@ -105,7 +105,7 @@
 ├─ api/
 │  ├─ index.js                # 유일한 Vercel 함수: 라우팅·CSRF(Origin) 검사·세션·오류 형식
 │  └─ _lib/                   # db 연결, http, session, audit, settings, signature
-│     └─ routes/              # auth, vehicles, users, reservations, usage-logs, ledgers(결재 포함), dashboard
+│     └─ routes/              # auth, vehicles, users, reservations, usage-logs, ledgers(결재 포함), dashboard, approval-line
 ├─ db/
 │  ├─ schema.sql              # 테이블 정의 (여러 번 실행해도 안전)
 │  └─ migrations/             # 스키마 변경 이력 (배포 후 변경부터 사용)
@@ -137,7 +137,7 @@
 | `vehicles` | 차량 | id, plate_no, model, seats, fuel_type, initial_odometer, status, note | 1:N 예약·운행일지 |
 | `reservations` | 차량예약 | id, vehicle_id, user_id, start_at, end_at, destination, purpose_category, purpose_note, passenger_count, status | 1:0..1 운행일지 |
 | `usage_logs` | 운행일지(차량사용대장의 한 줄) | id, reservation_id(선택), vehicle_id, driver_id, drive_date, depart_at, return_at, odometer_start, odometer_end, distance_km(자동), destination, purpose_category, passenger_count, fuel_liters, fuel_cost, note, driver_signature, status | N:1 월별 차량대장 |
-| `monthly_ledgers` | 월별 차량대장 | id, vehicle_id, year_month, total_distance, total_fuel_liters, total_fuel_cost, log_count, status, submitted_by, submitted_at | 1:N 결재 서명 |
+| `monthly_ledgers` | 월별 차량대장 | id, vehicle_id, year_month, total_distance, total_fuel_liters, total_fuel_cost, log_count, status, approval_steps(결재요청 시점 결재라인 스냅숏), submitted_by, submitted_at | 1:N 결재 서명 |
 | `approvals` | 결재 서명 | id, ledger_id, step_order, step_name, approver_id, decision, signature, comment, decided_at | N:1 월별 차량대장 |
 | `audit_logs` | 감사 기록 | id, user_id, action, entity, entity_id, at, summary | — |
 
@@ -230,7 +230,7 @@
 |---|---|---|---|
 | TODO-01 | **[입력 필요] 고유 서식**: 기관이 쓰는 차량사용대장·월별 차량대장 양식(항목, 칸 순서, 결재란 모양) | F-04, F-05, F-10(출력) | 일반적인 항목으로 임시 설계, 양식 받은 후 `print.css`·필드 조정 |
 | TODO-02 | **[입력 필요] 예외·승인 절차**: 예약 승인 필요 여부, 당일·긴급 예약, 장거리·야간·주말 운행, 사고·고장 처리, 개인 차량 사용 여부 | F-03 상태 전환 | 기본 `자동 확정`, 설정으로 승인제 전환 가능 |
-| TODO-03 | 결재선(담당→팀장→부장→관장 등 단계 수와 명칭) | F-06 | `approval_steps` 설정값, 기본 예시 2단계 |
+| TODO-03 | 결재선(담당→팀장→부장→관장 등 단계 수와 명칭) | F-06, F-14 | 기본 예시 2단계. **관리자가 결재라인 설정 화면에서 편집 가능** — 기관 결재선 확정 시 그대로 입력 |
 | TODO-04 | 운행 목적 분류 목록(예: 사례관리 방문, 프로그램 운영, 행정업무, 물품 운반, 기타) | F-03, F-04 통계 | 예시값으로 시작, 관리자가 수정 가능 |
 | TODO-05 | 기록 보존기간·폐기 기준 | 백업·삭제 정책 | **확인 필요** — 기관 규정·관련 법령 확인 전까지 자동 삭제 기능 없음 |
 | ~~TODO-06~~ | DB 공급자와 인증 방식 | 인프라 | **확정 (2026-11-19)**: Supabase(PostgreSQL) + 자체 세션 인증 |
@@ -251,7 +251,8 @@
 | F-06 결재 | ✅ 구현 | 단계 순서 강제, 반려 이력 보존, 결재완료 시 잠금 |
 | F-07 서명 | ✅ 구현 | 캔버스 + 키보드 대체 서명 |
 | F-08 차량 관리 / F-09 사용자 관리 | ✅ 구현 | |
-| F-10 PDF 출력 | ✅ 월별 대장 | 운행일지 1건·기간별 차량사용대장 출력은 미구현 |
+| F-10 PDF 출력 | ✅ 월별 대장 | 차량별 + 이 달 전체 차량 한 번에 출력, 결재란은 결재라인대로. 운행일지 1건·기간별 차량사용대장 출력은 미구현 |
+| F-14 결재라인 설정 | ✅ 구현 | 단계 추가·이름·순서·삭제, 단계별 결재자, '담당' 칸, 진행 중 잠금, 대장별 스냅숏 |
 | F-11 백업·복원 | ⏳ 미구현(2차) | 그 전까지 Supabase 자동 백업 사용 |
 | F-12 글자 크기 | ✅ 구현 | |
 | F-13 시스템 설정 화면 | ⏳ 미구현(2차) | 설정값은 `settings` 테이블에 SQL로 입력, 없으면 기본값 |

@@ -84,16 +84,20 @@ export async function computeLedger(sql, user, vehicleId, ym, { withSignature = 
   if (ym > currentYm()) blockers.push({ code: 'FUTURE', message: '아직 오지 않은 달은 결재를 요청할 수 없습니다.' });
 
   const step = currentStep(approvals, round);
-  const stepInfo = settings.approval_steps.find((s) => s.order === step) || null;
+  // 결재요청 이후에는 요청 시점의 결재라인 스냅숏을 쓴다 (F-14)
+  const steps = (snapshot && ledger.approval_steps) || settings.approval_steps;
+  const stepInfo = steps.find((s) => s.order === step) || null;
+  const [submitter] = ledger?.submitted_by ? await sql`select name from users where id = ${ledger.submitted_by}` : [];
   return {
     vehicle, year_month: ym, status, round,
     ledger: ledger ? {
       id: ledger.id, manager_comment: ledger.manager_comment, recall_reason: ledger.recall_reason,
-      submitted_at: ledger.submitted_at, submitted_by: ledger.submitted_by,
+      submitted_at: ledger.submitted_at, submitted_by: ledger.submitted_by, submitted_by_name: submitter?.name ?? null,
     } : null,
     summary, live_summary: live, by_purpose: byPurpose, logs, missing_reservations: missing,
     mismatch_count: mismatches.length, blockers,
-    approval_steps: settings.approval_steps,
+    approval_steps: steps,
+    show_drafter: settings.approval_show_drafter,
     approvals, current_step: status === 'submitted' ? step : null, current_step_name: status === 'submitted' ? stepInfo?.name ?? null : null,
     last_rejection: approvals.filter((a) => a.decision === 'rejected').at(-1) ?? null,
     can_submit: hasRole(user, 'manager') && ['open', 'rejected'].includes(status) && blockers.length === 0,
@@ -141,16 +145,17 @@ async function submit({ sql, user, body }) {
   if (!['open', 'rejected'].includes(data.status)) throw conflict('이미 결재요청했거나 결재가 끝난 대장입니다.');
   if (data.blockers.length) throw conflict(data.blockers.map((b) => b.message).join(' '), { code: 'LEDGER_BLOCKED', blockers: data.blockers });
   const s = data.live_summary;
+  const { approval_steps: steps } = await getSettings(sql);
   const [row] = await sql`
     insert into monthly_ledgers (vehicle_id, year_month, status, round, log_count, total_distance, total_fuel_liters,
-      total_fuel_cost, odometer_first, odometer_last, manager_comment, submitted_by, submitted_at)
+      total_fuel_cost, odometer_first, odometer_last, manager_comment, approval_steps, submitted_by, submitted_at)
     values (${vehicleId}, ${ym}, 'submitted', 1, ${s.log_count}, ${s.total_distance}, ${s.total_fuel_liters},
-      ${s.total_fuel_cost}, ${s.odometer_first}, ${s.odometer_last}, ${comment}, ${user.id}, now())
+      ${s.total_fuel_cost}, ${s.odometer_first}, ${s.odometer_last}, ${comment}, ${sql.json(steps)}, ${user.id}, now())
     on conflict (vehicle_id, year_month) do update set
       status = 'submitted', round = monthly_ledgers.round + 1, log_count = excluded.log_count,
       total_distance = excluded.total_distance, total_fuel_liters = excluded.total_fuel_liters,
       total_fuel_cost = excluded.total_fuel_cost, odometer_first = excluded.odometer_first,
-      odometer_last = excluded.odometer_last, manager_comment = excluded.manager_comment,
+      odometer_last = excluded.odometer_last, manager_comment = excluded.manager_comment, approval_steps = excluded.approval_steps,
       recall_reason = '', submitted_by = excluded.submitted_by, submitted_at = now(), updated_at = now()
     where monthly_ledgers.status in ('open', 'rejected')
     returning id, round`;
@@ -186,16 +191,17 @@ async function decide({ sql, user, params, body }) {
   if (!ledger) throw notFound('대장을 찾을 수 없습니다.');
   if (ledger.status !== 'submitted') throw conflict('결재 진행 중인 대장이 아닙니다.');
   const settings = await getSettings(sql);
+  const steps = ledger.approval_steps || settings.approval_steps; // 요청 시점 스냅숏 (F-14)
   const approvals = await sql`select round, step_order, decision from approvals where ledger_id = ${ledger.id}`;
   const step = currentStep(approvals, ledger.round);
-  const stepInfo = settings.approval_steps.find((s) => s.order === step);
+  const stepInfo = steps.find((s) => s.order === step);
   if (!stepInfo) throw conflict('결재 단계 설정을 확인해 주세요.');
   if (user.approver_step !== step) {
     const mineIsLater = user.approver_step > step;
     throw forbidden(mineIsLater ? '이전 단계 결재가 끝나지 않았습니다.' : `현재는 ${stepInfo.name} 결재 단계입니다.`);
   }
   const sig = decision === 'approved' ? await verifySignature(sql, user, input.signature) : null;
-  const isLast = step === Math.max(...settings.approval_steps.map((s) => s.order));
+  const isLast = step === Math.max(...steps.map((s) => s.order));
   try {
     await sql.begin(async (tx) => {
       await tx`

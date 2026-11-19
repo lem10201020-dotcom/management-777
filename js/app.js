@@ -19,6 +19,7 @@ route('/approvals', { roles: ['approver'], load: () => import('./views/approvals
 route('/print/ledger', { roles: ['manager', 'approver', 'admin'], load: () => import('./views/print-ledger.js') });
 route('/vehicles', { roles: ['manager', 'admin'], load: () => import('./views/vehicles.js') });
 route('/users', { roles: ['admin'], load: () => import('./views/users.js') });
+route('/approval-line', { roles: ['admin', 'manager', 'approver'], load: () => import('./views/approval-line.js') });
 route('/settings', { load: () => import('./views/settings.js') });
 route('/more', { load: () => import('./views/more.js') });
 

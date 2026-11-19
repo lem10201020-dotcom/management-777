@@ -197,6 +197,50 @@ describe('차량예약관리대장 API', { skip }, () => {
     assert.ok(audits.every((a) => !/Sample1234|전자 확인|data:image/.test(a.s)));
   });
 
+  test('F-14 결재라인 편집: 권한·검증·스냅숏·진행 중 잠금', async () => {
+    const ad = client(srv.base); await ad.login('admin01');
+    const s1 = client(srv.base); await s1.login('staff01');
+    const m = client(srv.base); await m.login('mgr01');
+    const a1 = client(srv.base); await a1.login('apv01');
+    const a2 = client(srv.base); await a2.login('apv02');
+    const line = (await s1.get('/approval-line')).data;
+    assert.deepEqual(line.steps.map((st) => [st.name, st.approvers.map((a) => a.id)]), [['팀장', [ids.apv01]], ['관장', [ids.apv02]]]);
+    assert.equal((await s1.patch('/approval-line', {})).status, 405);
+    const body = (steps, extra = {}) => ({ steps, show_drafter: true, ...extra });
+    // 권한·검증
+    assert.equal((await s1.put('/approval-line', body([{ name: '팀장', approver_ids: [ids.apv01] }]))).status, 403);
+    const noApprover = await ad.put('/approval-line', body([{ name: '팀장', approver_ids: [] }]));
+    assert.equal(noApprover.status, 400);
+    assert.ok(noApprover.data.error.fields.step_0_approvers);
+    assert.equal((await ad.put('/approval-line', body([{ name: '팀장', approver_ids: [ids.apv01] }, { name: '관장', approver_ids: [ids.apv01] }]))).status, 400);
+    // 3단계로 변경: 팀장 → 사무국장(이담당) → 관장
+    const saved = await ad.put('/approval-line', body([
+      { name: '팀장', approver_ids: [ids.apv01] }, { name: '사무국장', approver_ids: [ids.mgr01] }, { name: '관장', approver_ids: [ids.apv02] }]));
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.data.steps.map((st) => st.name), ['팀장', '사무국장', '관장']);
+    const [mgr] = await srv.sql`select roles, approver_step from users where id = ${ids.mgr01}`;
+    assert.deepEqual([mgr.roles.includes('approver'), mgr.approver_step], [true, 2]);
+    // 이미 결재완료된 지난달 대장은 요청 당시 결재라인(2단계) 유지
+    const old = (await m.get(`/ledgers?ym=${lastYm}&vehicle_id=${veh1}`)).data;
+    assert.deepEqual(old.approval_steps.map((st) => st.name), ['팀장', '관장']);
+    // 새 대장(운행 없는 차량)은 3단계로 진행
+    const sub = await m.post('/ledgers/submit', { vehicle_id: veh2, year_month: lastYm });
+    assert.equal(sub.status, 200);
+    assert.deepEqual(sub.data.approval_steps.map((st) => st.name), ['팀장', '사무국장', '관장']);
+    assert.equal(sub.data.ledger.submitted_by_name, '이담당');
+    // 결재 진행 중에는 결재라인 변경 불가
+    const blocked = await ad.put('/approval-line', body([{ name: '관장', approver_ids: [ids.apv02] }]));
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.data.error.code, 'APPROVAL_IN_PROGRESS');
+    const id = sub.data.ledger.id;
+    assert.equal((await a2.post(`/ledgers/${id}/decide`, { decision: 'approved', signature: typedSig('최관장') })).status, 403);
+    await a1.post(`/ledgers/${id}/decide`, { decision: 'approved', signature: typedSig('박팀장') });
+    assert.equal((await m.post(`/ledgers/${id}/decide`, { decision: 'approved', signature: typedSig('이담당') })).data.current_step, 3);
+    assert.equal((await a2.post(`/ledgers/${id}/decide`, { decision: 'approved', signature: typedSig('최관장') })).data.status, 'approved');
+    // 원래 2단계로 되돌림 (이후 테스트 영향 없게)
+    assert.equal((await ad.put('/approval-line', body([{ name: '팀장', approver_ids: [ids.apv01] }, { name: '관장', approver_ids: [ids.apv02] }]))).status, 200);
+  });
+
   test('T-09 사용자 관리·마지막 관리자 보호', async () => {
     const ad = client(srv.base); await ad.login('admin01');
     const created = await ad.post('/users', { login_id: 'staff03', name: '오가상', roles: ['staff'] });
