@@ -12,7 +12,26 @@ export class ApiError extends Error {
 let onUnauthenticated = null;
 export function setUnauthenticatedHandler(fn) { onUnauthenticated = fn; }
 
+// 체험 모드: 서버·DB 없이 브라우저 안의 가짜 API 사용 (js/demo/mock-api.js)
+const MODE_KEY = 'vl.mode';
+export function isDemo() { try { return localStorage.getItem(MODE_KEY) === 'demo'; } catch { return false; } }
+export function setDemo(on) { try { if (on) localStorage.setItem(MODE_KEY, 'demo'); else localStorage.removeItem(MODE_KEY); } catch { /* 무시 */ } }
+
+async function demoApi(method, path, body, retryAuth) {
+  const { demoRequest } = await import('./demo/mock-api.js');
+  try {
+    return await demoRequest(method, path, body);
+  } catch (e) {
+    const err = new ApiError(e.status || 500, e.message, e.extra || {});
+    if (err.status === 401 && err.code === 'UNAUTHENTICATED' && retryAuth && onUnauthenticated) {
+      if (await onUnauthenticated()) return demoApi(method, path, body, false);
+    }
+    throw err;
+  }
+}
+
 export async function api(method, path, body, { retryAuth = true } = {}) {
+  if (isDemo()) return demoApi(method, path, body, retryAuth);
   let res;
   try {
     res = await fetch(`/api${path}`, {

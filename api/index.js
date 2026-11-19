@@ -56,6 +56,16 @@ export default async function handler(req, res) {
     path = `/${path.replace(/^\/+|\/+$/g, '')}`;
     url.searchParams.delete('path');
 
+    // 배포 상태 점검: /api/health (로그인 불필요, 개인정보 없음)
+    if (path === '/health' && req.method === 'GET') {
+      const checks = { database_url: !!process.env.DATABASE_URL, session_secret: (process.env.SESSION_SECRET || '').length >= 32, db: 'unchecked' };
+      if (checks.database_url) {
+        try { await getSql()`select 1 from users limit 1`; checks.db = 'ok'; } catch (e) { checks.db = classifySetupError(e)?.code || 'error'; }
+      }
+      send(res, 200, { ok: checks.database_url && checks.session_secret && checks.db === 'ok', checks });
+      return;
+    }
+
     const { route, params, pathMatched } = match(req.method, path);
     if (!route) throw new HttpError(pathMatched ? 405 : 404, pathMatched ? '허용되지 않은 방식입니다.' : '요청한 기능을 찾을 수 없습니다.');
     checkOrigin(req);
@@ -75,9 +85,36 @@ export default async function handler(req, res) {
   } catch (err) {
     if (err instanceof HttpError) {
       send(res, err.status, { error: { message: err.message, ...err.extra } });
-    } else {
-      console.error('[api] unexpected error', err);
-      send(res, 500, { error: { message: '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' } });
+      return;
     }
+    const setup = classifySetupError(err);
+    if (setup) {
+      console.error('[api] setup error', setup.code, err.message);
+      send(res, 503, { error: setup });
+      return;
+    }
+    console.error('[api] unexpected error', err);
+    send(res, 500, { error: { message: '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.' } });
   }
+}
+
+/** 배포 설정 문제를 구분해 관리자가 고칠 수 있게 안내한다 (README 5장) */
+function classifySetupError(err) {
+  const msg = String(err?.message || '');
+  if (msg.includes('DATABASE_URL')) {
+    return { code: 'DB_NOT_CONFIGURED', message: 'DB 연결 정보(DATABASE_URL)가 설정되지 않았습니다. Vercel → Settings → Environment Variables에 Supabase 접속 주소를 등록한 뒤 다시 배포하세요.' };
+  }
+  if (msg.includes('SESSION_SECRET')) {
+    return { code: 'SERVER_NOT_CONFIGURED', message: '세션 비밀키(SESSION_SECRET, 32자 이상)가 설정되지 않았습니다. Vercel 환경변수에 등록한 뒤 다시 배포하세요.' };
+  }
+  if (err?.code === '42P01') {
+    return { code: 'DB_NOT_INITIALIZED', message: 'DB에 테이블이 아직 없습니다. Supabase SQL Editor에서 db/schema.sql 을 실행하거나 npm run db:setup 을 실행하세요.' };
+  }
+  if (['28P01', '28000'].includes(err?.code)) {
+    return { code: 'DB_AUTH_FAILED', message: 'DB 비밀번호 또는 사용자 이름이 맞지 않습니다. DATABASE_URL 을 다시 확인하세요.' };
+  }
+  if (['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'CONNECT_TIMEOUT', 'EAI_AGAIN', '3D000', 'XX000'].includes(err?.code) || /connect|timeout|Tenant or user not found/i.test(msg)) {
+    return { code: 'DB_CONNECTION_FAILED', message: 'DB 서버에 접속하지 못했습니다. DATABASE_URL 주소(Transaction pooler, 포트 6543)와 Supabase 프로젝트 상태를 확인하세요.' };
+  }
+  return null;
 }

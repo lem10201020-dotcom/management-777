@@ -1,6 +1,6 @@
 // 앱 초기화: 글자 크기 적용 → 로그인 확인 → 셸·라우터 시작
 import { h, clear, icon, $$ } from './dom.js';
-import { api, get, post, setUnauthenticatedHandler } from './api.js';
+import { api, get, post, setUnauthenticatedHandler, isDemo, setDemo } from './api.js';
 import { state, getFontScale, applyFontScale, FONT_SCALES } from './state.js';
 import { route, startRouter, visibleNav, render } from './router.js';
 import { openModal } from './components/modal.js';
@@ -24,7 +24,11 @@ route('/more', { load: () => import('./views/more.js') });
 
 const app = document.getElementById('app');
 
+// 서버가 아직 DB 없이 배포된 경우 → 자동으로 체험 모드 (서버 오류 코드: api/index.js)
+const NOT_CONFIGURED = ['DB_NOT_CONFIGURED', 'SERVER_NOT_CONFIGURED'];
+
 async function boot() {
+  if (new URLSearchParams(location.search).has('demo')) setDemo(true);
   try {
     const me = await get('/auth/me');
     if (!me.user) return showLogin();
@@ -32,10 +36,48 @@ async function boot() {
     if (state.user.must_change_password) return showPasswordChange();
     showShell();
   } catch (err) {
-    clear(app).append(h('div', { class: 'auth-wrap' }, h('div', { class: 'alert alert-error', role: 'alert' },
-      h('div', { class: 'alert-body' }, h('strong', {}, '서버에 연결하지 못했습니다.'), h('p', {}, err.message),
-        h('div', {}, h('button', { class: 'btn btn-primary', onclick: boot }, '다시 시도'))))));
+    if (!isDemo() && (NOT_CONFIGURED.includes(err.code) || err.status === 404)) { setDemo(true); return boot(); }
+    showServerError(err);
   }
+}
+
+function showServerError(err) {
+  const tryDemo = h('button', { class: 'btn btn-primary btn-block', onclick: () => { setDemo(true); boot(); } }, '체험 모드로 바로 사용하기');
+  const retry = h('button', { class: 'btn btn-block', onclick: boot }, '다시 시도');
+  clear(app).append(h('main', { class: 'auth-wrap', id: 'main' }, h('div', { class: 'card auth-card stack' },
+    h('div', { class: 'auth-brand' }, h('p', { class: 'brand-org' }, '서구종합사회복지관'), h('h1', {}, '차량예약관리대장')),
+    h('div', { class: 'alert alert-error', role: 'alert' }, h('span', { class: 'alert-icon', 'aria-hidden': 'true' }, '⚠'),
+      h('div', { class: 'alert-body' }, h('strong', {}, '서버 DB에 연결하지 못했습니다.'), h('p', {}, err.message),
+        err.code ? h('p', { class: 'small' }, `오류 코드: ${err.code}`) : null)),
+    h('p', { class: 'small muted' }, '체험 모드는 서버 없이 이 브라우저 안에서 가상 데이터로 모든 기능을 써 볼 수 있습니다. 실제 개인정보는 입력하지 마세요.'),
+    tryDemo, retry)));
+  tryDemo.focus();
+  document.title = '연결 오류 | 차량예약관리대장';
+}
+
+function demoBanner() {
+  return h('div', { class: 'alert alert-warning' }, h('span', { class: 'alert-icon', 'aria-hidden': 'true' }, '!'),
+    h('div', { class: 'alert-body' }, h('strong', {}, '체험 모드 (서버 없이 동작)'),
+      h('p', {}, '데이터는 이 브라우저에만 저장되고 다른 사람과 공유되지 않습니다. 가상 데이터만 입력하세요.')));
+}
+
+const DEMO_ACCOUNTS = [
+  ['staff01', '직원 · 홍길동'], ['mgr01', '차량담당자 · 이담당'], ['apv01', '1단계 결재 · 박팀장'],
+  ['apv02', '2단계 결재 · 최관장'], ['admin01', '관리자'],
+];
+function demoQuickLogin() {
+  return h('div', { class: 'stack' },
+    h('p', { class: 'small', style: { 'font-weight': '700' } }, '역할을 골라 바로 시작하기'),
+    h('div', { class: 'grid', style: { gap: '.5rem' } }, DEMO_ACCOUNTS.map(([id, label]) => {
+      const b = h('button', { type: 'button', class: 'btn btn-block' }, label);
+      b.addEventListener('click', () => busy(b, '접속 중…', async () => {
+        const data = await api('POST', '/auth/login', { login_id: id, password: 'Sample1234' }, { retryAuth: false });
+        Object.assign(state, data);
+        showShell();
+      }));
+      return b;
+    })),
+    h('p', { class: 'help' }, '직접 로그인할 때 비밀번호는 모두 Sample1234 입니다.'));
 }
 
 function loginForm(onSuccess, { compact = false } = {}) {
@@ -69,10 +111,14 @@ function loginForm(onSuccess, { compact = false } = {}) {
 }
 
 function showLogin() {
-  clear(app).append(h('main', { class: 'auth-wrap', id: 'main' }, h('div', { class: 'card auth-card' },
+  const demo = isDemo();
+  clear(app).append(h('main', { class: 'auth-wrap', id: 'main' }, h('div', { class: 'card auth-card stack' },
     h('div', { class: 'auth-brand' }, h('p', { class: 'brand-org' }, '서구종합사회복지관'), h('h1', {}, '차량예약관리대장')),
+    demo ? demoBanner() : null,
+    demo ? demoQuickLogin() : null,
+    demo ? h('hr', { style: { border: 0, 'border-top': '1px solid var(--color-border)', width: '100%' } }) : null,
     loginForm(() => (state.user.must_change_password ? showPasswordChange() : showShell())))));
-  app.querySelector('input')?.focus();
+  (app.querySelector('.auth-card .btn') || app.querySelector('input'))?.focus();
   document.title = '로그인 | 차량예약관리대장';
 }
 
@@ -156,6 +202,7 @@ function showShell() {
     h('header', { class: 'app-header' },
       h('a', { class: 'brand', href: '#/' }, h('span', { class: 'brand-org' }, '서구종합사회복지관'), h('span', { class: 'brand-name' }, '차량예약관리대장')),
       h('div', { class: 'header-actions' },
+        isDemo() ? h('a', { class: 'badge badge-warning', href: '#/settings', title: '체험 모드 설정' }, '체험 모드') : null,
         h('span', { class: 'header-user' }, `${state.user.name}님`),
         fontScaleButton(), logoutBtn)),
     h('div', { class: 'app-body' },
