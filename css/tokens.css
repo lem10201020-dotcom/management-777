@@ -1,0 +1,44 @@
+/* 디자인 토큰 — UI_UX.md 2장과 반드시 일치 */
+:root {
+  --color-navy-900: #0F1B33;
+  --color-navy-700: #1B2A4A;
+  --color-navy-500: #3A4D73;
+  --color-navy-100: #E8ECF4;
+  --color-gold-600: #8A6A2F; /* 골드 텍스트 */
+  --color-gold-400: #C9A45C; /* 장식 전용 — 텍스트 금지 */
+  --color-gold-100: #F7F0E1;
+  --color-white: #FFFFFF;
+  --color-bg: #F6F7FA;
+  --color-text: #1F2430;
+  --color-text-muted: #5B6272;
+  --color-border: #D9DEE7;
+  --color-border-strong: #8A93A6;
+  --color-success: #1E7A4C;
+  --color-success-bg: #E7F4EC;
+  --color-warning: #9A5B00;
+  --color-warning-bg: #FDF3E1;
+  --color-danger: #B42318;
+  --color-danger-bg: #FDECEA;
+
+  --font-sans: "Pretendard", "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --fs-xs: 0.8125rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: 1.75rem;
+
+  --sp-1: 0.25rem; --sp-2: 0.5rem; --sp-3: 0.75rem; --sp-4: 1rem;
+  --sp-5: 1.25rem; --sp-6: 1.5rem; --sp-8: 2rem; --sp-12: 3rem;
+
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --shadow-card: 0 1px 2px rgba(15, 27, 51, .06), 0 4px 12px rgba(15, 27, 51, .04);
+  --shadow-pop: 0 8px 32px rgba(15, 27, 51, .18);
+
+  --header-h: 3.5rem;
+  --tabbar-h: 4rem;
+  --sidebar-w: 15rem;
+  --content-max: 75rem;
+  --touch: 2.75rem; /* 44px */
+}

@@ -3,7 +3,7 @@
 서구종합사회복지관 직원이 기관 차량을 **예약하고, 운행 기록을 남기고, 월별 차량대장을 출력·결재**하는 웹앱입니다.
 PC와 모바일 브라우저에서 같은 데이터를 사용합니다.
 
-> ⚠️ 현재 단계: **설계 문서 단계**입니다. 아래 실행·배포 절차는 구현 완료 후 기준이며, 구현 중 변경되면 이 문서를 함께 갱신합니다.
+> 현재 단계: **MVP 개발 중** — 예약·운행일지·월별 대장·결재·출력이 동작합니다. 백업·복원과 설정 화면은 2차 개발 예정입니다. (구현 현황: CLAUDE.md 11장)
 
 ---
 
@@ -30,7 +30,7 @@ PC와 모바일 브라우저에서 같은 데이터를 사용합니다.
 | 운행일지(차량사용대장) | 예약 내용을 불러와 출발·도착 시각, 계기판 km, 주유 내역 입력 → 운행거리 자동 계산 → 운전자 서명 |
 | 월별 차량대장 | 차량·월 단위 자동 집계, A4 출력(PDF 저장), 결재 서명 |
 | 차량·사용자 관리 | 차량 등록·수정·검색, 직원 계정 등록·수정·검색·비활성화 |
-| 백업·복원 | 관리자 전용 JSON 내보내기, 검증 후 복원 |
+| 백업·복원 | 관리자 전용 JSON 내보내기, 검증 후 복원 (**2차 개발 예정**) |
 | 글자 크기 조절 | 기본 / 크게 / 아주 크게 (기기별 저장) |
 
 자세한 명세는 [FEATURES.md](./FEATURES.md), 화면 규칙은 [UI_UX.md](./UI_UX.md)를 참고하세요.
@@ -40,21 +40,20 @@ PC와 모바일 브라우저에서 같은 데이터를 사용합니다.
 ## 3. 기술 구성
 
 - 프론트엔드: HTML + CSS + JavaScript(프레임워크 없음, 빌드 없음)
-- 백엔드: Vercel Serverless Functions (`/api`)
-- 데이터베이스: PostgreSQL 계열 서버 DB — **공급자 결정 필요**(Neon, Supabase 등)
+- 백엔드: Vercel Serverless Function 1개(`api/index.js`)가 모든 `/api/*` 처리
+- 데이터베이스: **Supabase (PostgreSQL)** — 서버에서만 접속, 로그인은 자체 구현(아이디+비밀번호)
 - 배포: Vercel
 
-## 4. 로컬 실행 (구현 후)
+## 4. 로컬 실행
 
 ### 4-1. 준비물
 - Node.js 20 이상
-- Vercel CLI
-- PostgreSQL 데이터베이스(개발용, **가상 데이터만**)
+- PostgreSQL 15 이상 (로컬 설치 또는 개발용 Supabase 프로젝트) — **가상 데이터만**
 
 ### 4-2. 설치·실행
 
 ```bash
-npm install -g vercel
+npm install
 ```
 
 ```bash
@@ -65,45 +64,74 @@ cp .env.example .env.local
 
 | 변수 | 설명 |
 |---|---|
-| `DATABASE_URL` | 개발용 DB 접속 문자열 |
-| `SESSION_SECRET` | 세션 서명용 임의의 긴 문자열(32자 이상) |
+| `DATABASE_URL` | DB 접속 문자열. 로컬 예: `postgres://사용자:비밀번호@localhost:5432/vehicle_dev` |
+| `SESSION_SECRET` | 세션 서명용 임의 문자열(32자 이상). 예: `openssl rand -hex 32` |
 | `APP_TIMEZONE` | `Asia/Seoul` |
 
-DB 테이블 생성과 가상 샘플 데이터 입력:
+테이블 생성과 가상 샘플 데이터 입력:
 
 ```bash
-psql "$DATABASE_URL" -f db/schema.sql
+npm run db:setup
 ```
 
 ```bash
-psql "$DATABASE_URL" -f db/seed-sample.sql
+npm run db:seed
 ```
 
-개발 서버 실행 (프론트 + `/api` 함께 실행):
+샘플 계정(비밀번호 모두 `Sample1234`): `staff01`(직원), `staff02`(직원), `mgr01`(차량담당자), `apv01`(1단계 결재자·팀장), `apv02`(2단계 결재자·관장), `admin01`(관리자). 데이터를 처음 상태로 되돌리려면 `npm run db:seed -- --reset`.
+
+개발 서버 실행 (Vercel CLI 없이 화면 + `/api` 함께 실행):
 
 ```bash
-vercel dev
+npm run dev
 ```
 
 브라우저에서 `http://localhost:3000` 접속.
 
 ### 4-3. 테스트
 
+단위 테스트 + API 통합 테스트. API 테스트는 **이름에 `test`가 들어간 별도 DB**를 쓰며, 실행할 때마다 그 DB를 비우고 다시 만듭니다.
+
 ```bash
-node --test tests/unit
+TEST_DATABASE_URL=postgres://사용자:비밀번호@localhost:5432/vehicle_test npm test
+```
+
+화면 E2E(Playwright): 개발 서버를 켜고 샘플 데이터를 초기화한 뒤 실행합니다.
+
+```bash
+npm run db:seed -- --reset
 ```
 
 ```bash
-npx playwright test --trace off
+npm run test:e2e
 ```
 
-## 5. 배포 (Vercel)
+## 5. 배포 (Supabase + Vercel)
 
-1. GitHub 저장소를 Vercel 프로젝트에 연결합니다.
-2. Vercel 대시보드 → Settings → Environment Variables에 `DATABASE_URL`, `SESSION_SECRET`, `APP_TIMEZONE`을 **Production / Preview 각각 별도 값**으로 등록합니다. Preview에는 운영 DB를 연결하지 않습니다.
-3. `main` 브랜치 병합 시 Production 배포, 그 외 브랜치는 Preview 배포됩니다.
-4. 최초 배포 후 관리자 계정 1개를 생성하고, 초기 비밀번호를 즉시 변경합니다.
-5. 배포 리전과 DB 리전을 가깝게(예: 서울 또는 도쿄) 맞추는 것을 권장합니다. 데이터의 국외 저장 가능성은 SECURITY.md 7장을 확인하세요(**확인 필요**).
+### 5-1. Supabase
+1. Supabase에서 프로젝트를 만듭니다. 리전은 **Northeast Asia (Seoul)** 를 권장합니다. (데이터 국외 저장 관련 의무는 SECURITY.md 7장 — 확인 필요)
+2. Project Settings → Database → Connection string에서 **Transaction pooler**(포트 6543) 주소를 복사합니다.
+3. 내 PC에서 그 주소로 테이블을 만듭니다. (SQL Editor에 `db/schema.sql` 내용을 붙여 실행해도 됩니다)
+
+```bash
+DATABASE_URL="복사한 주소" npm run db:setup
+```
+
+4. 운영 최초 관리자 계정을 만듭니다. 화면에 한 번만 표시되는 임시 비밀번호로 로그인한 뒤 바로 변경하세요.
+
+```bash
+DATABASE_URL="복사한 주소" node scripts/create-admin.js admin 관리자이름
+```
+
+5. Database → Backups에서 자동 백업 상태를 확인합니다(요금제별 차이 — 확인 필요).
+6. 이 앱은 Supabase의 API 키(anon/service_role)를 쓰지 않습니다. 모든 테이블은 RLS가 켜져 있어 REST API로 접근할 수 없습니다.
+
+### 5-2. Vercel
+1. GitHub 저장소를 Vercel 프로젝트에 연결합니다. (Framework Preset: Other, 빌드 명령 없음)
+2. Settings → Environment Variables에 `DATABASE_URL`, `SESSION_SECRET`, `APP_TIMEZONE`을 등록합니다. **Preview에는 운영 DB가 아닌 별도 Supabase 프로젝트**를 연결합니다.
+3. Settings → Functions에서 리전을 Seoul(icn1)로 맞추는 것을 권장합니다.
+4. `main` 브랜치 병합 시 Production 배포, 그 외 브랜치는 Preview 배포됩니다.
+5. 운영 DB에는 `npm run db:seed`를 실행하지 마세요(스크립트가 로컬 DB가 아니면 거부합니다).
 
 ---
 
@@ -133,7 +161,7 @@ npx playwright test --trace off
 
 - **업무 데이터(예약·운행일지·대장·결재)는 서버 DB에 저장**되며, 로그인한 직원 모두가 권한에 맞게 같은 데이터를 봅니다.
 - 브라우저에는 글자 크기 같은 **개인 화면 설정만** 저장합니다. 브라우저 저장소는 기기마다 따로 저장되고, 자동 동기화·암호화·다중 사용자 권한 관리를 제공하지 않으므로 업무 데이터 저장에 쓰지 않습니다.
-- **백업**: 관리자는 [설정 → 백업·복원]에서 정기적으로(예: 매월 결재 완료 후) JSON 백업 파일을 내려받습니다. DB 공급자의 자동 백업 기능도 함께 켜 두는 것을 권장합니다.
+- **백업**: 현재는 Supabase 자동 백업에 의존합니다. 관리자용 JSON 백업·복원 화면(FEATURES.md F-11)은 2차 개발 예정이며, 완성되면 매월 결재 완료 후 백업 파일을 내려받는 것을 권장합니다.
 - **백업 파일에는 직원 이름·서명 이미지가 들어 있습니다.** 기관이 지정한 보안 저장소에만 보관하고, 개인 PC 바탕화면·메신저·개인 메일로 옮기지 마세요.
 - **복원**은 현재 데이터를 덮어쓸 수 있으므로, 복원 전 자동으로 현재 상태 백업을 먼저 만든 뒤 진행합니다. 미리보기에서 건수를 반드시 확인하세요.
 - 기록 보존기간과 폐기 기준은 **확인 필요**(기관 규정·관련 법령 확인 후 반영)입니다.

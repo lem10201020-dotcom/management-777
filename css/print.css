@@ -1,0 +1,16 @@
+/* A4 출력 전용 (FEATURES.md F-10) */
+@page { size: A4 landscape; margin: 12mm; }
+@page portrait { size: A4 portrait; margin: 12mm; }
+@media print {
+  html { font-size: 100% !important; }
+  body { background: #fff; }
+  .app-header, .sidebar, .tabbar, .toast-region, .print-bar, .skip-link, .no-print { display: none !important; }
+  .app-body { display: block !important; }
+  .main { padding: 0 !important; max-width: none !important; }
+  .paper { margin: 0; padding: 0; box-shadow: none; width: auto; overflow: visible; }
+  .paper.portrait { page: portrait; }
+  .doc-table thead { display: table-header-group; }
+  .doc-table tfoot { display: table-row-group; }
+  .doc-table tr, .approval-box { break-inside: avoid; page-break-inside: avoid; }
+  a { color: inherit; text-decoration: none; }
+}

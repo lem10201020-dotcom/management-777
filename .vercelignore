@@ -1,0 +1,8 @@
+db/
+tests/
+scripts/
+server/
+*.md
+.env*
+playwright.config.js
+test-results/

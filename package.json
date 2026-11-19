@@ -1,0 +1,22 @@
+{
+  "name": "vehicle-ledger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "서구종합사회복지관 차량예약관리대장",
+  "scripts": {
+    "dev": "node server/dev.js",
+    "db:setup": "node scripts/db-setup.js",
+    "db:seed": "node scripts/db-seed.js",
+    "test": "node --test \"tests/unit/*.test.js\" \"tests/api/*.test.js\"",
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "node tests/e2e/ui-flow.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.2",
+    "postgres": "3.4.7"
+  }
+}

@@ -133,7 +133,8 @@
 
 - DB 접속정보·세션 비밀키는 **Vercel 환경변수**로만 관리, 저장소 커밋 금지(`.env*`는 `.gitignore`)
 - Production과 Preview 환경의 DB 분리. Preview·개발 환경에는 **가상 데이터만**
-- DB 계정은 앱 전용 최소 권한 계정 사용
+- **Supabase**: 앱은 서버 함수에서 DB 접속 문자열로만 접속하며 Supabase API 키(anon/service_role)를 쓰지 않는다. 모든 테이블에 RLS를 켜고 정책을 만들지 않으며 `anon`·`authenticated` 권한을 회수해 REST/GraphQL로 읽을 수 없게 한다(`db/schema.sql`). DB 비밀번호는 Vercel 환경변수에만 둔다.
+- DB 계정은 앱 전용 최소 권한 계정 사용을 검토(현재는 Supabase 기본 `postgres` 계정 — 개선 과제)
 - DB 공급자 자동 백업·시점 복구 기능 활성화
 - **데이터 저장 위치(국외 리전 여부)와 국외 이전 관련 고지·동의 필요 여부는 확인 필요** — DB 공급자 선택(TODO-06) 시 함께 검토
 - 외부 스크립트·글꼴 CDN 사용 최소화, 사용 시 버전 고정 및 CSP에 출처 명시

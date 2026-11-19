@@ -59,9 +59,9 @@
 | 영역 | 선택 | 비고 |
 |---|---|---|
 | 프론트엔드 | HTML + CSS + JavaScript (ES Modules), **프레임워크·번들러 없음** | 해시 라우팅(`#/reservations`) SPA |
-| 백엔드 | Vercel Serverless Functions (`/api/*.js`, Node.js) | 프론트에서 DB에 직접 접속 금지 |
-| DB | 관계형 DB(PostgreSQL 계열) | **공급자 결정 필요**: Neon(Vercel Marketplace) / Supabase 등 — 아래 미확정 사항 참고 |
-| 인증 | 서버 세션(HttpOnly 쿠키) 기반 로그인 | **방식 결정 필요**: 자체 구현(아이디+비밀번호, bcrypt) 또는 Supabase Auth |
+| 백엔드 | Vercel Serverless Function **1개**(`api/index.js`)가 모든 `/api/*`를 처리 (`vercel.json` rewrite) | 프론트에서 DB에 직접 접속 금지. 함수 개수 제한 회피 |
+| DB | **Supabase (PostgreSQL) — 확정** | 서버에서 `postgres` 드라이버로 접속(Transaction pooler 6543, `prepare: false`). Supabase REST/anon 키는 사용하지 않으며 모든 테이블 RLS 활성화·권한 회수 |
+| 인증 | **자체 구현 — 확정**: 아이디+비밀번호(bcrypt cost 12), `sessions` 테이블, HttpOnly 쿠키 | Supabase Auth는 이메일 기반이라 사용하지 않음 |
 | PDF | 인쇄 전용 CSS(`print.css`) + `window.print()` | 외부 PDF 라이브러리는 서식 확정 후 필요 시에만 검토 |
 | 서명 | `<canvas>` + Pointer Events, PNG(Data URL)로 저장 | 키보드 대체 수단 제공(FEATURES.md F-07) |
 | 배포 | Vercel (GitHub 연동, Preview/Production 분리) | 환경변수로 DB 접속정보 관리 |
@@ -102,24 +102,24 @@
 │     ├─ validate.js          # 입력 검증 규칙(서버와 동일 규칙 공유)
 │     ├─ format.js            # 날짜·숫자·거리 포맷
 │     └─ escape.js            # HTML 이스케이프
-├─ api/                       # Vercel Serverless Functions
-│  ├─ auth/login.js · logout.js · me.js
-│  ├─ vehicles.js
-│  ├─ users.js
-│  ├─ reservations.js
-│  ├─ usage-logs.js
-│  ├─ monthly-ledgers.js
-│  ├─ stats.js
-│  ├─ backup/export.js · import.js
-│  └─ _lib/                   # db 연결, 세션, 권한 검사, 검증, 감사로그
+├─ api/
+│  ├─ index.js                # 유일한 Vercel 함수: 라우팅·CSRF(Origin) 검사·세션·오류 형식
+│  └─ _lib/                   # db 연결, http, session, audit, settings, signature
+│     └─ routes/              # auth, vehicles, users, reservations, usage-logs, ledgers(결재 포함), dashboard
 ├─ db/
-│  ├─ schema.sql              # 테이블 정의
-│  ├─ migrations/             # 스키마 변경 이력
-│  └─ seed-sample.sql         # 가상 데이터만
+│  ├─ schema.sql              # 테이블 정의 (여러 번 실행해도 안전)
+│  └─ migrations/             # 스키마 변경 이력 (배포 후 변경부터 사용)
+├─ scripts/
+│  ├─ db-setup.js             # schema.sql 적용
+│  ├─ db-seed.js              # 가상 샘플 데이터 (로컬 DB 외에는 거부)
+│  └─ create-admin.js         # 운영 최초 관리자 생성
+├─ server/dev.js              # 로컬 개발 서버 (정적 파일 + /api, Vercel CLI 불필요)
 ├─ tests/
-│  ├─ unit/                   # node --test
-│  └─ e2e/                    # Playwright
-├─ vercel.json
+│  ├─ unit/                   # node --test (검증·날짜 규칙)
+│  ├─ api/                    # node --test + 테스트 DB (권한·상태 전이·업무 흐름)
+│  └─ e2e/ui-flow.cjs         # Playwright 화면 흐름
+├─ vercel.json                # rewrite, 보안 헤더(CSP 등)
+├─ .vercelignore              # db/tests/scripts/server/문서는 배포하지 않음
 └─ *.md                       # 프로젝트 문서
 ```
 
@@ -131,7 +131,9 @@
 
 | 엔터티 (테이블) | 한국어 용어 | 핵심 필드 | 관계 |
 |---|---|---|---|
-| `users` | 사용자(직원) | id, login_id, name, team, role, phone_ext(선택), is_active, password_hash | 1:N 예약·운행일지 |
+| `users` | 사용자(직원) | id, login_id, name, team, roles(배열), approver_step(결재자의 담당 단계), phone_ext(선택), can_drive, is_active, password_hash, must_change_password | 1:N 예약·운행일지 |
+| `sessions` | 로그인 세션 | id(토큰 HMAC), user_id, last_seen_at, expires_at | N:1 사용자 |
+| `settings` | 시스템 설정 | key, value(jsonb) — FEATURES.md F-13 키 | — |
 | `vehicles` | 차량 | id, plate_no, model, seats, fuel_type, initial_odometer, status, note | 1:N 예약·운행일지 |
 | `reservations` | 차량예약 | id, vehicle_id, user_id, start_at, end_at, destination, purpose_category, purpose_note, passenger_count, status | 1:0..1 운행일지 |
 | `usage_logs` | 운행일지(차량사용대장의 한 줄) | id, reservation_id(선택), vehicle_id, driver_id, drive_date, depart_at, return_at, odometer_start, odometer_end, distance_km(자동), destination, purpose_category, passenger_count, fuel_liters, fuel_cost, note, driver_signature, status | N:1 월별 차량대장 |
@@ -230,6 +232,25 @@
 | TODO-03 | 결재선(담당→팀장→부장→관장 등 단계 수와 명칭) | F-06 | `approval_steps` 설정값, 기본 예시 2단계 |
 | TODO-04 | 운행 목적 분류 목록(예: 사례관리 방문, 프로그램 운영, 행정업무, 물품 운반, 기타) | F-03, F-04 통계 | 예시값으로 시작, 관리자가 수정 가능 |
 | TODO-05 | 기록 보존기간·폐기 기준 | 백업·삭제 정책 | **확인 필요** — 기관 규정·관련 법령 확인 전까지 자동 삭제 기능 없음 |
-| TODO-06 | DB 공급자(Neon / Supabase 등)와 인증 방식 | 인프라 | 결정 전까지 `api/_lib/db.js` 인터페이스로 추상화 |
+| ~~TODO-06~~ | DB 공급자와 인증 방식 | 인프라 | **확정 (2026-11-19)**: Supabase(PostgreSQL) + 자체 세션 인증 |
 | TODO-07 | 주유·정비·보험 등 차량 관리 항목 범위 | F-04, F-08 | MVP는 주유만, 정비는 제안 항목 |
 | TODO-08 | 전자서명의 내부 결재 효력 인정 여부 | F-07 | **확인 필요** — 인정 전까지 출력물 자필 서명 병행 가능하도록 설계 |
+
+---
+
+## 11. 구현 현황 (2026-11-19 기준)
+
+| 기능 | 상태 | 비고 |
+|---|---|---|
+| F-01 로그인·권한 | ✅ 구현 | 5회 실패 잠금, 첫 로그인 비밀번호 변경 강제, 세션 만료 시 재로그인 모달 |
+| F-02 대시보드·통계 | ✅ 구현 | 차트는 CSS 막대 + 동일 수치 표 |
+| F-03 차량예약·캘린더 | ✅ 구현 | 월/주/일·목록 보기. 주 보기는 시간축 대신 요일별 카드(MVP) |
+| F-04 운행일지 | ✅ 구현 | km 연속성 경고·사유, 자정 넘김, 임시저장 |
+| F-05 월별 차량대장 | ✅ 구현 | 결재요청 점검, 스냅숏, 회수 |
+| F-06 결재 | ✅ 구현 | 단계 순서 강제, 반려 이력 보존, 결재완료 시 잠금 |
+| F-07 서명 | ✅ 구현 | 캔버스 + 키보드 대체 서명 |
+| F-08 차량 관리 / F-09 사용자 관리 | ✅ 구현 | |
+| F-10 PDF 출력 | ✅ 월별 대장 | 운행일지 1건·기간별 차량사용대장 출력은 미구현 |
+| F-11 백업·복원 | ⏳ 미구현(2차) | 그 전까지 Supabase 자동 백업 사용 |
+| F-12 글자 크기 | ✅ 구현 | |
+| F-13 시스템 설정 화면 | ⏳ 미구현(2차) | 설정값은 `settings` 테이블에 SQL로 입력, 없으면 기본값 |
